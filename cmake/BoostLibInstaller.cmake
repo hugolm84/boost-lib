@@ -105,10 +105,30 @@ function(boost_lib_installer req_boost_version req_boost_libs)
                     set(debug_lib_path "${install_dir}/${stage_dir}/lib/libboost_${lib_name}-${compiler_name}-mt-gd-${lib_postfix}.lib")
                     set(lib_path "${install_dir}/${stage_dir}/lib/libboost_${lib_name}-${compiler_name}-mt-${lib_postfix}.lib")
                 else()
+                    set(LIBSUFFIX "")
+                    if(UNIX)
+                        if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+                            set(LIBSUFFIX "-x64")
+                        endif()
+                    endif()
+
+                    if(APPLE)
+                        # Extract first letter after architecture= (e.g., 'a' from 'architecture=arm')
+                        string(REGEX MATCH "architecture=([a-zA-Z])" _ "${b2Args}")
+                        set(ARCHITECTURE_PREFIX "${CMAKE_MATCH_1}")
+
+                        # Extract address model number (e.g., 32_64 from address-model=32_64)
+                        string(REGEX MATCH "address-model=([0-9_]+)" _ "${b2Args}")
+                        set(ADDRESS_MODEL "${CMAKE_MATCH_1}")
+
+                        # Build lib suffix like -x64 or -a32
+                        set(LIBSUFFIX "-${ARCHITECTURE_PREFIX}${ADDRESS_MODEL}")
+                    endif()
+
                     if((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "") OR (NOT DEFINED CMAKE_BUILD_TYPE))
-                        set(lib_path "${install_dir}/${stage_dir}/lib/libboost_${lib_name}-mt-d.a")
+                        set(lib_path "${install_dir}/${stage_dir}/lib/libboost_${lib_name}-mt-d${LIBSUFFIX}.a")
                     else()
-                        set(lib_path "${install_dir}/${stage_dir}/lib/libboost_${lib_name}-mt.a")
+                        set(lib_path "${install_dir}/${stage_dir}/lib/libboost_${lib_name}-mt${LIBSUFFIX}.a")
                     endif()
                 endif()
 
