@@ -59,10 +59,19 @@ function(get_boots_lib_b2_args)
             list(APPEND b2Args address-model=64)
         else()
             list(APPEND b2Args address-model=32)
-        endif()      
+        endif()
     elseif(APPLE)
+        string(REGEX MATCH "^([0-9]+)" CLANG_VERSION_MAJOR "${CMAKE_CXX_COMPILER_VERSION}")
         list(APPEND b2Args toolset=clang cxxflags=-fPIC cxxflags=-std=c++11 cxxflags=-stdlib=libc++
-                         linkflags=-stdlib=libc++ architecture=combined address-model=32_64 --layout=tagged)
+            linkflags=-stdlib=libc++ architecture=combined address-model=32_64 --layout=tagged)
+
+        # Add workaround flag only if Clang >= 16
+        # Change mpl::integral_c to boost::integral_constant to avoid Clang 16 errors
+        string(COMPARE LESS "${req_boost_version}" "1.81.0" boost_is_less_than_181)
+
+        if(CLANG_VERSION_MAJOR AND CLANG_VERSION_MAJOR GREATER_EQUAL 16)
+            list(APPEND b2Args cxxflags=-Wno-enum-constexpr-conversion)
+        endif()
     elseif(UNIX)
         list(APPEND b2Args --layout=tagged -sNO_BZIP2=1)
         if(ANDROID_BUILD)
