@@ -28,6 +28,7 @@ function(boost_lib_installer req_boost_version req_boost_libs)
     set(lib_postfix "${CMAKE_MATCH_1}_${CMAKE_MATCH_2}")
     message(STATUS "Boost library postfix: ${lib_postfix}")
 
+
     # Bootstrap
     if(WIN32)
         set(bootstrap bootstrap.bat)
@@ -70,125 +71,129 @@ function(boost_lib_installer req_boost_version req_boost_libs)
 
         # Resolve dependency tree
         foreach(i RANGE 4)
+            set(req_boost_libs2 "")
+
             foreach(lib ${req_boost_libs})
                 list(APPEND req_boost_libs2 ${lib})
                 list(APPEND req_boost_libs2 ${${lib}_dep})
             endforeach()
+
             list(REMOVE_DUPLICATES req_boost_libs2)
             set(req_boost_libs "${req_boost_libs2}")
         endforeach()
 
-        foreach(lib ${req_boost_libs})
-            message(STATUS "Resolving Boost library: ${lib}")
+        # Build all required Boost libs in one b2 call
+        list(TRANSFORM req_boost_libs PREPEND "--with-")
 
-            if (EXISTS "${install_dir}/libs/${lib}/build/")
-                # Has source
+        # Prepare build byproducts (library output files)
+        set(lib_paths "")
+        set(lib_map "")
 
-                # Setup variables
-                set(jam_lib boost_${lib}_jam)
-                set(boost_lib boost_${lib})
-                if(lib STREQUAL "test")
-                    set(lib_name unit_test_framework)
-                else()
-                    set(lib_name ${lib})
-                endif()
+        foreach(lib_arg ${req_boost_libs})
+            string(REPLACE "--with-" "" lib "${lib_arg}")
 
-                if(MSVC)
-                    if(MSVC11)
-                        set(compiler_name vc110)
-                    elseif(MSVC12)
-                        set(compiler_name vc120)
-                    elseif(MSVC14)
-                        set(compiler_name vc140)
-                    endif()
-
-                    set(debug_lib_path "${install_dir}/${stage_dir}/lib/libboost_${lib_name}-${compiler_name}-mt-gd-${lib_postfix}.lib")
-                    set(lib_path "${install_dir}/${stage_dir}/lib/libboost_${lib_name}-${compiler_name}-mt-${lib_postfix}.lib")
-                else()
-                    set(LIBSUFFIX "")
-                    if(UNIX)
-                        if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-                            set(LIBSUFFIX "-x64")
-                        endif()
-                    endif()
-
-                    if(APPLE)
-                        # Extract first letter after architecture= (e.g., 'a' from 'architecture=arm')
-                        string(REGEX MATCH "architecture=([a-zA-Z])" _ "${b2Args}")
-                        set(ARCHITECTURE_PREFIX "${CMAKE_MATCH_1}")
-
-                        # Extract address model number (e.g., 32_64 from address-model=32_64)
-                        string(REGEX MATCH "address-model=([0-9_]+)" _ "${b2Args}")
-                        set(ADDRESS_MODEL "${CMAKE_MATCH_1}")
-
-                        # Build lib suffix like -x64 or -a32
-                        set(LIBSUFFIX "-${ARCHITECTURE_PREFIX}${ADDRESS_MODEL}")
-                    endif()
-
-                    if((CMAKE_BUILD_TYPE STREQUAL "Debug") OR (CMAKE_BUILD_TYPE STREQUAL "") OR (NOT DEFINED CMAKE_BUILD_TYPE))
-                        set(lib_path "${install_dir}/${stage_dir}/lib/libboost_${lib_name}-mt-d${LIBSUFFIX}.a")
-                    else()
-                        set(lib_path "${install_dir}/${stage_dir}/lib/libboost_${lib_name}-mt${LIBSUFFIX}.a")
-                    endif()
-                endif()
-
-                # Create lib
-                if(EXISTS ${lib_path})
-                    message(STATUS "Library ${lib} already built.")
-                    # Dummy project:
-                    ExternalProject_Add(
-                        "${jam_lib}"
-                        STAMP_DIR "${CMAKE_BINARY_DIR}/boost-${req_boost_version}"
-                        SOURCE_DIR "${install_dir}"
-                        BINARY_DIR "${install_dir}"
-                        CONFIGURE_COMMAND ""
-                        BUILD_COMMAND ""
-                        INSTALL_COMMAND ""
-                        BUILD_BYPRODUCTS "${lib_path}"
-                        LOG_BUILD OFF)
-                else()
-                    message(STATUS "Setting up external project to build ${lib}.")
-                    ExternalProject_Add(
-                        "${jam_lib}"
-                        STAMP_DIR "${CMAKE_BINARY_DIR}/boost-${req_boost_version}"
-                        SOURCE_DIR "${install_dir}"
-                        BINARY_DIR "${install_dir}"
-                        CONFIGURE_COMMAND ""
-                        BUILD_COMMAND "${b2_command}" "${b2Args}" --with-${lib}
-                        INSTALL_COMMAND ""
-                        BUILD_BYPRODUCTS "${lib_path}"
-                        LOG_BUILD ON)
-                endif()
-
-                add_library(${boost_lib} STATIC IMPORTED GLOBAL)
-
-                if(MSVC)
-                    set_target_properties(${boost_lib} PROPERTIES
-                        IMPORTED_LOCATION_DEBUG "${debug_lib_path}"
-                        IMPORTED_LOCATION "${lib_path}"
-                        LINKER_LANGUAGE CXX)
-                else()
-                    set_target_properties(${boost_lib} PROPERTIES
-                        IMPORTED_LOCATION "${lib_path}"
-                        LINKER_LANGUAGE CXX)
-                endif()
-
-                # Exlude it from all
-                set_target_properties(${jam_lib} ${boost_lib} PROPERTIES LABELS Boost EXCLUDE_FROM_ALL TRUE)
-
-                # Setup dependencies
-                add_dependencies(${boost_lib} ${jam_lib})
-                foreach(dep_lib ${${lib}_dep})
-                    message(STATUS "Setting ${boost_lib} dependent on boost_${dep_lib}")
-                    add_dependencies(${boost_lib} boost_${dep_lib})
-                endforeach()
-
-                list(APPEND boost_libs ${boost_lib})
-
+            if(lib STREQUAL "test")
+                set(lib_name unit_test_framework)
+            else()
+                set(lib_name ${lib})
             endif()
 
+            if(MSVC)
+                if(MSVC11)
+                    set(compiler_name vc110)
+                elseif(MSVC12)
+                    set(compiler_name vc120)
+                elseif(MSVC14)
+                    set(compiler_name vc140)
+                endif()
+
+                set(lib_file libboost_${lib_name}-${compiler_name}-mt-${lib_postfix}.lib)
+            else()
+                set(LIBSUFFIX "")
+
+                if(UNIX AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+                    set(LIBSUFFIX "-x64")
+                endif()
+
+                if(APPLE)
+                    # Extract first letter after architecture= (e.g., 'a' from 'architecture=arm')
+                    string(REGEX MATCH "architecture=([a-zA-Z])" _ "${b2Args}")
+                    set(ARCHITECTURE_PREFIX "${CMAKE_MATCH_1}")
+
+                    # Extract address model number (e.g., 64 from address-model=64)
+                    string(REGEX MATCH "address-model=([0-9_]+)" _ "${b2Args}")
+                    set(ADDRESS_MODEL "${CMAKE_MATCH_1}")
+
+                    # Build lib suffix like -x64 or -a32
+                    set(LIBSUFFIX "-${ARCHITECTURE_PREFIX}${ADDRESS_MODEL}")
+                endif()
+
+                if(CMAKE_BUILD_TYPE STREQUAL "Debug" OR NOT DEFINED CMAKE_BUILD_TYPE OR CMAKE_BUILD_TYPE STREQUAL "")
+                    set(lib_file libboost_${lib_name}-mt-d${LIBSUFFIX}.a)
+                else()
+                    set(lib_file libboost_${lib_name}-mt${LIBSUFFIX}.a)
+                endif()
+            endif()
+
+            set(lib_path "${install_dir}/${stage_dir}/lib/${lib_file}")
+            list(APPEND lib_paths "${lib_path}")
+            set(lib_map_${lib} "${lib_path}")
         endforeach()
-    endif(req_boost_libs)
+
+        # b2 headers
+        if(NOT EXISTS ${install_dir}/boost/)
+            message(STATUS "Generating headers ...")
+            execute_process(COMMAND ${b2_command} --ignore-site-config headers WORKING_DIRECTORY ${install_dir} RESULT_VARIABLE err OUTPUT_VARIABLE err_msg)
+
+            if(err)
+                message(FATAL_ERROR "b2 error:\n${err_msg}")
+            endif(err)
+        else()
+            message(STATUS "Headers found.")
+        endif()
+
+        # Create a single ExternalProject to build all requested Boost libraries
+        ExternalProject_Add(boost_all
+            STAMP_DIR "${CMAKE_BINARY_DIR}/boost-${req_boost_version}"
+            SOURCE_DIR "${install_dir}"
+            BINARY_DIR "${install_dir}"
+            CONFIGURE_COMMAND ""
+            BUILD_COMMAND "${b2_command}" ${b2Args} --debug-configuration ${req_boost_libs}
+            INSTALL_COMMAND ""
+            BUILD_BYPRODUCTS ${lib_paths}
+            LOG_BUILD ON
+        )
+
+        # Register each Boost library as an imported target that depends on boost_all
+        foreach(lib_arg ${req_boost_libs})
+            string(REPLACE "--with-" "" lib "${lib_arg}")
+
+            if(lib STREQUAL "test")
+                set(lib_name unit_test_framework)
+            else()
+                set(lib_name ${lib})
+            endif()
+
+            set(boost_lib boost_${lib})
+            set(lib_path "${lib_map_${lib}}")
+
+            add_library(${boost_lib} STATIC IMPORTED GLOBAL)
+            set_target_properties(${boost_lib} PROPERTIES
+                IMPORTED_LOCATION "${lib_path}"
+                LINKER_LANGUAGE CXX
+            )
+            add_dependencies(${boost_lib} boost_all)
+
+            # Setup CMake dependency tree for linking order
+            foreach(dep_lib ${${lib}_dep})
+                message(STATUS "Setting ${boost_lib} dependent on boost_${dep_lib}")
+                add_dependencies(${boost_lib} boost_${dep_lib})
+            endforeach()
+
+            list(APPEND boost_libs ${boost_lib})
+        endforeach()
+    endif()
+
 
     if(boost_libs)
         message(STATUS "Boost libs scheduled for build: ${boost_libs}")
@@ -197,17 +202,6 @@ function(boost_lib_installer req_boost_version req_boost_libs)
     else()
         set(Boost_LIBRARIES "" PARENT_SCOPE)
         set(Boost_LIBRARY_DIR "" CACHE STRING "" FORCE)
-    endif()
-
-    # b2 headers
-    if(NOT EXISTS ${install_dir}/boost/)
-        message(STATUS "Generating headers ...")
-        execute_process(COMMAND ${b2_command} --ignore-site-config headers WORKING_DIRECTORY ${install_dir} RESULT_VARIABLE err OUTPUT_VARIABLE err_msg)
-        if(err)
-            message(FATAL_ERROR "b2 error:\n${err_msg}")
-        endif(err)
-    else()
-        message(STATUS "Headers found.")
     endif()
 
     set(Boost_INCLUDE_DIR "${install_dir}" CACHE STRING "" FORCE)
